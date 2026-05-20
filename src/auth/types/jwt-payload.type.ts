@@ -7,3 +7,8 @@ export interface RefreshTokenPayload {
   sub: string;
   sessionId: string;
 }
+
+export interface PasswordResetTokenPayload {
+  sub: string;
+  otpId: string;
+}

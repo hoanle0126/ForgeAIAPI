@@ -6,8 +6,12 @@ import { App } from 'supertest/types';
 
 import { AppModule } from '../src/app.module';
 
-process.env.DATABASE_URL ??=
-  'postgresql://postgres:postgres@localhost:5432/forgeai_auth?schema=public';
+process.env.DB_HOST ??= 'localhost';
+process.env.DB_PORT ??= '5432';
+process.env.DB_NAME ??= 'forgeai_auth';
+process.env.DB_USER ??= 'postgres';
+process.env.DB_PASSWORD ??= 'postgres';
+process.env.DB_SCHEMA ??= 'public';
 process.env.JWT_ACCESS_SECRET ??= 'forgeai-access-secret';
 process.env.JWT_REFRESH_SECRET ??= 'forgeai-refresh-secret';
 

@@ -149,7 +149,9 @@ describe('WorkoutsService', () => {
     await expect(
       service.createWorkout(userId, {
         title: 'Invalid day',
-        items: [{ exerciseId: 'missing', order: 1, sets: [{ order: 1, reps: 10 }] }],
+        items: [
+          { exerciseId: 'missing', order: 1, sets: [{ order: 1, reps: 10 }] },
+        ],
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });

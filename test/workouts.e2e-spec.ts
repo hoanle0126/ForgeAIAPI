@@ -6,8 +6,12 @@ import { App } from 'supertest/types';
 
 import { AppModule } from '../src/app.module';
 
-process.env.DATABASE_URL ??=
-  'postgresql://postgres:postgres@localhost:5432/forgeai_auth?schema=public';
+process.env.DB_HOST ??= 'localhost';
+process.env.DB_PORT ??= '5432';
+process.env.DB_NAME ??= 'forgeai_auth';
+process.env.DB_USER ??= 'postgres';
+process.env.DB_PASSWORD ??= 'postgres';
+process.env.DB_SCHEMA ??= 'public';
 process.env.JWT_ACCESS_SECRET ??= 'forgeai-access-secret';
 process.env.JWT_REFRESH_SECRET ??= 'forgeai-refresh-secret';
 
@@ -27,7 +31,7 @@ describe('Workouts API (e2e)', () => {
         id: string;
         name: string;
         ownerId: string;
-        isGlobal: boolean;
+        visibility: string;
       };
     };
   }
@@ -86,7 +90,7 @@ describe('Workouts API (e2e)', () => {
     const exerciseBody = exerciseResponse.body as ExerciseResponse;
 
     expect(exerciseBody.data.exercise.name).toBe('Goblet Squat');
-    expect(exerciseBody.data.exercise.isGlobal).toBe(false);
+    expect(exerciseBody.data.exercise.visibility).toBe('private');
 
     const workoutResponse = await request(app.getHttpServer())
       .post('/workouts')
@@ -147,7 +151,7 @@ describe('Workouts API (e2e)', () => {
           },
         ],
       })
-      .expect(404);
+      .expect(400);
   });
 
   it('requires authentication for workout endpoints', async () => {

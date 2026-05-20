@@ -203,7 +203,10 @@ export class WorkoutsService {
           }
         : {}),
       ...(query.visibility
-        ? { visibility: query.visibility as Prisma.ExerciseWhereInput['visibility'] }
+        ? {
+            visibility:
+              query.visibility as Prisma.ExerciseWhereInput['visibility'],
+          }
         : {}),
     };
   }
@@ -334,7 +337,9 @@ export class WorkoutsService {
 
     for (const set of sets) {
       if (orders.has(set.order)) {
-        throw new BadRequestException('Workout set order values must be unique');
+        throw new BadRequestException(
+          'Workout set order values must be unique',
+        );
       }
 
       orders.add(set.order);
