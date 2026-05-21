@@ -3,9 +3,9 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
   Min,
   ValidateNested,
@@ -14,7 +14,9 @@ import {
 import { WorkoutSetDto } from './workout-set.dto';
 
 export class WorkoutItemDto {
-  @IsUUID()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
   @IsOptional()
   exerciseId?: string;
 
