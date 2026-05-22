@@ -188,7 +188,7 @@ describe('AI workout builder API (e2e)', () => {
       .expect(400);
   });
 
-  it('generates a 4-week monthly workout plan for four selected training days', async () => {
+  it('generates a 4-week monthly workout plan for selected training frequency', async () => {
     const accessToken = await registerAndGetAccessToken(
       'monthly-ai@example.com',
     );
@@ -203,7 +203,7 @@ describe('AI workout builder API (e2e)', () => {
         weightKg: 82,
         age: 29,
         activityLevel: 'very_active',
-        trainingDays: ['mo', 'tu', 'th', 'sa'],
+        trainingDays: ['mo', 'we', 'fr'],
         sessionMinutes: 45,
         preferredTime: 'evening',
       })
@@ -212,17 +212,12 @@ describe('AI workout builder API (e2e)', () => {
 
     expect(body.message).toBe('AI monthly workout plan generated successfully');
     expect(body.data.plan.blockLengthWeeks).toBe(4);
-    expect(body.data.plan.selectedTrainingDays).toEqual([
-      'mo',
-      'tu',
-      'th',
-      'sa',
-    ]);
-    expect(body.data.plan.templateWorkouts).toHaveLength(4);
+    expect(body.data.plan.selectedTrainingDays).toEqual(['mo', 'we', 'fr']);
+    expect(body.data.plan.templateWorkouts).toHaveLength(3);
     expect(body.data.plan.weeks).toHaveLength(4);
     expect(body.data.plan.weeks[0].days).toHaveLength(7);
     expect(body.data.plan.reassessment.dueAfterDays).toBe(28);
-    expect(body.data.workoutTemplateDrafts).toHaveLength(4);
+    expect(body.data.workoutTemplateDrafts).toHaveLength(3);
     expect(body.data.workoutTemplateDrafts[0]).toEqual(
       expect.objectContaining({
         isTemplate: true,
@@ -230,7 +225,7 @@ describe('AI workout builder API (e2e)', () => {
     );
   });
 
-  it('rejects monthly planning unless exactly four training days are selected', async () => {
+  it('rejects monthly planning with empty training days', async () => {
     const accessToken = await registerAndGetAccessToken(
       'monthly-invalid@example.com',
     );
@@ -245,7 +240,7 @@ describe('AI workout builder API (e2e)', () => {
         weightKg: 82,
         age: 29,
         activityLevel: 'very_active',
-        trainingDays: ['mo', 'we', 'fr'],
+        trainingDays: [],
         sessionMinutes: 45,
         preferredTime: 'evening',
       })

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Visibility } from '@prisma/client';
 
 import { BuildMonthlyWorkoutPlanDto } from './dto/build-monthly-workout-plan.dto';
@@ -182,12 +182,6 @@ export class AiService {
   ): Promise<{ message: string; data: unknown }> {
     const normalizedTrainingDays = this.normalizeTrainingDays(dto.trainingDays);
 
-    if (normalizedTrainingDays.length !== 4) {
-      throw new BadRequestException(
-        'Monthly planning currently requires exactly 4 training days',
-      );
-    }
-
     const coachPlan = await this.modelAiRunner.buildMonthlyWorkoutPlan({
       goal: dto.goal,
       equipment: dto.equipment,
@@ -195,7 +189,7 @@ export class AiService {
       weight_kg: Math.round(dto.weightKg),
       age: dto.age,
       activity_level: dto.activityLevel,
-      training_days_per_week: 4,
+      training_days_per_week: normalizedTrainingDays.length,
       session_minutes: dto.sessionMinutes,
       experience_level: dto.experienceLevel ?? 'beginner',
       injuries: dto.injuries,
