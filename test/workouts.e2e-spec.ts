@@ -43,8 +43,10 @@ describe('Workouts API (e2e)', () => {
         title: string;
         items: Array<{
           exerciseNameSnapshot: string;
-          sets: number;
-          reps: number;
+          sets: Array<{
+            reps: number;
+            restSeconds: number;
+          }>;
         }>;
       };
     };
@@ -103,9 +105,24 @@ describe('Workouts API (e2e)', () => {
           {
             exerciseId: exerciseBody.data.exercise.id,
             order: 1,
-            sets: 3,
-            reps: 10,
             restSeconds: 90,
+            sets: [
+              {
+                order: 1,
+                reps: 10,
+                restSeconds: 90,
+              },
+              {
+                order: 2,
+                reps: 10,
+                restSeconds: 90,
+              },
+              {
+                order: 3,
+                reps: 10,
+                restSeconds: 90,
+              },
+            ],
           },
         ],
       })
@@ -116,8 +133,13 @@ describe('Workouts API (e2e)', () => {
     expect(workoutBody.data.workout.items[0]).toEqual(
       expect.objectContaining({
         exerciseNameSnapshot: 'Goblet Squat',
-        sets: 3,
+      }),
+    );
+    expect(workoutBody.data.workout.items[0].sets).toHaveLength(3);
+    expect(workoutBody.data.workout.items[0].sets[0]).toEqual(
+      expect.objectContaining({
         reps: 10,
+        restSeconds: 90,
       }),
     );
   });
@@ -146,12 +168,16 @@ describe('Workouts API (e2e)', () => {
           {
             exerciseId: exerciseBody.data.exercise.id,
             order: 1,
-            sets: 3,
-            reps: 10,
+            sets: [
+              {
+                order: 1,
+                reps: 10,
+              },
+            ],
           },
         ],
       })
-      .expect(400);
+      .expect(404);
   });
 
   it('requires authentication for workout endpoints', async () => {

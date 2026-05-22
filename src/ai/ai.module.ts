@@ -4,10 +4,11 @@ import { JwtModule } from '@nestjs/jwt';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
+import { ModelAiRunnerService } from './model-ai-runner.service';
 
 @Module({
   imports: [PrismaModule, JwtModule.register({})],
   controllers: [AiController],
-  providers: [AiService],
+  providers: [AiService, ModelAiRunnerService],
 })
 export class AiModule {}
