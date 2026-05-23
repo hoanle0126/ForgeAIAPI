@@ -13,7 +13,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { equipmentTypes, workoutGoals } from '../../workouts/dto/workout.enums';
+import {
+  equipmentTypes,
+  workoutGoals,
+  workoutScheduleDays,
+} from '../../workouts/dto/workout.enums';
 
 export const aiActivityLevels = [
   'sedentary',
@@ -29,15 +33,7 @@ export const aiPreferredTimes = [
   'flexible',
 ] as const;
 
-export const aiTrainingDays = [
-  'mo',
-  'tu',
-  'we',
-  'th',
-  'fr',
-  'sa',
-  'su',
-] as const;
+export const aiTrainingDays = workoutScheduleDays;
 
 export const aiExperienceLevels = [
   'beginner',
@@ -131,18 +127,6 @@ export class BuildWorkoutPlanDto {
   @ArrayUnique()
   @IsOptional()
   injuries?: string[];
-
-  @IsArray()
-  @IsString({ each: true })
-  @ArrayUnique()
-  @IsOptional()
-  allergies?: string[];
-
-  @IsArray()
-  @IsString({ each: true })
-  @ArrayUnique()
-  @IsOptional()
-  dietaryPreferences?: string[];
 
   @ValidateNested()
   @Type(() => BuildWorkoutPlanFeedbackDto)

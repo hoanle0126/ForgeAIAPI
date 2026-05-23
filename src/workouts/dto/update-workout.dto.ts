@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsDate,
@@ -16,11 +17,13 @@ import {
 import {
   exerciseDifficulties,
   workoutGoals,
+  workoutScheduleDays,
   workoutStatuses,
 } from './workout.enums';
 import type {
   ExerciseDifficultyDto,
   WorkoutGoalDto,
+  WorkoutScheduleDayDto,
   WorkoutStatusDto,
 } from './workout.enums';
 import { WorkoutItemDto } from './workout-item.dto';
@@ -44,6 +47,13 @@ export class UpdateWorkoutDto {
   @IsDate()
   @IsOptional()
   scheduledFor?: Date;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsIn(workoutScheduleDays, { each: true })
+  @IsOptional()
+  scheduledDays?: WorkoutScheduleDayDto[];
 
   @IsInt()
   @Min(1)

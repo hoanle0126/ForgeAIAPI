@@ -108,8 +108,6 @@ export class AiService {
       session_minutes: dto.sessionMinutes,
       experience_level: dto.experienceLevel ?? 'beginner',
       injuries: dto.injuries,
-      allergies: dto.allergies,
-      dietary_preferences: dto.dietaryPreferences,
       feedback: dto.feedback
         ? {
             missed_workouts: dto.feedback.missedWorkouts,
@@ -152,13 +150,6 @@ export class AiService {
           coachNotes,
           readinessAdjustment: coachPlan.readiness_adjustment,
           progressionPlan: coachPlan.progression_plan,
-          nutritionTargets: {
-            dailyCalories: coachPlan.daily_calorie_target,
-            proteinTargetG: coachPlan.protein_target_g,
-            carbTargetG: coachPlan.carb_target_g,
-            fatTargetG: coachPlan.fat_target_g,
-            dailyMacroCoverage: coachPlan.daily_macro_coverage,
-          },
           exercises: previewExercises,
           schedule: this.buildWeeklySchedule(
             normalizedTrainingDays,
@@ -172,6 +163,8 @@ export class AiService {
           coachPlan,
           previewExercises,
           title,
+          normalizedTrainingDays,
+          effectiveTrainingDays,
         ),
       },
     };
@@ -193,8 +186,6 @@ export class AiService {
       session_minutes: dto.sessionMinutes,
       experience_level: dto.experienceLevel ?? 'beginner',
       injuries: dto.injuries,
-      allergies: dto.allergies,
-      dietary_preferences: dto.dietaryPreferences,
       feedback: dto.feedback
         ? {
             missed_workouts: dto.feedback.missedWorkouts,
@@ -207,6 +198,10 @@ export class AiService {
 
     const templateWorkouts = coachPlan.workout_templates.map((template) =>
       this.buildMonthlyTemplateView(template),
+    );
+    const templateScheduledDays = this.distributeTemplateScheduledDays(
+      normalizedTrainingDays,
+      coachPlan.workout_templates.length,
     );
 
     return {
@@ -226,13 +221,6 @@ export class AiService {
           coachNotes: coachPlan.coach_notes,
           readinessAdjustment: coachPlan.readiness_adjustment,
           progressionPlan: coachPlan.progression_plan,
-          nutritionTargets: {
-            dailyCalories: coachPlan.daily_calorie_target,
-            proteinTargetG: coachPlan.protein_target_g,
-            carbTargetG: coachPlan.carb_target_g,
-            fatTargetG: coachPlan.fat_target_g,
-            dailyMacroCoverage: coachPlan.daily_macro_coverage,
-          },
           templateWorkouts,
           weeks: this.buildMonthlyWeeks(
             normalizedTrainingDays,
@@ -247,8 +235,14 @@ export class AiService {
             questions: coachPlan.reassessment.questions,
           },
         },
-        workoutTemplateDrafts: coachPlan.workout_templates.map((template) =>
-          this.buildWorkoutTemplateDraft(dto, coachPlan, template),
+        workoutTemplateDrafts: coachPlan.workout_templates.map(
+          (template, index) =>
+            this.buildWorkoutTemplateDraft(
+              dto,
+              coachPlan,
+              template,
+              templateScheduledDays[index] ?? [],
+            ),
         ),
       },
     };
@@ -394,6 +388,8 @@ export class AiService {
     coachPlan: ModelAiWorkoutPlan,
     previewExercises: ReturnType<AiService['buildPreviewExercises']>,
     title: string,
+    selectedTrainingDays: AiTrainingDay[],
+    effectiveTrainingDays: number,
   ) {
     const notes = [
       coachPlan.coach_summary,
@@ -405,6 +401,7 @@ export class AiService {
       title,
       description: coachPlan.coach_summary,
       isTemplate: true,
+      scheduledDays: selectedTrainingDays.slice(0, effectiveTrainingDays),
       durationMinutes: dto.sessionMinutes,
       difficulty: this.deriveWorkoutDifficulty(previewExercises),
       goal: dto.goal,
@@ -427,6 +424,7 @@ export class AiService {
     dto: BuildMonthlyWorkoutPlanDto,
     coachPlan: ModelAiMonthlyWorkoutPlan,
     template: ModelAiWorkoutTemplate,
+    scheduledDays: AiTrainingDay[],
   ) {
     const notes = [
       coachPlan.coach_summary,
@@ -439,6 +437,7 @@ export class AiService {
       title: template.title,
       description: `${template.focus} template for month 1`,
       isTemplate: true,
+      scheduledDays,
       durationMinutes: template.estimated_minutes,
       difficulty: this.deriveTemplateDifficulty(template),
       goal: dto.goal,
@@ -455,6 +454,29 @@ export class AiService {
         })),
       })),
     };
+  }
+
+  private distributeTemplateScheduledDays(
+    selectedTrainingDays: AiTrainingDay[],
+    templateCount: number,
+  ) {
+    if (templateCount <= 0) {
+      return [] as AiTrainingDay[][];
+    }
+
+    const scheduleByTemplate = Array.from(
+      { length: templateCount },
+      () => [] as AiTrainingDay[],
+    );
+    const fallbackTemplateIndex = templateCount - 1;
+
+    selectedTrainingDays.forEach((day, dayIndex) => {
+      const templateIndex =
+        dayIndex < templateCount ? dayIndex : fallbackTemplateIndex;
+      scheduleByTemplate[templateIndex].push(day);
+    });
+
+    return scheduleByTemplate;
   }
 
   private buildWorkoutTitle(

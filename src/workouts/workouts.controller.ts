@@ -87,6 +87,15 @@ export class WorkoutsController {
     return this.workoutsService.updateWorkout(req.user.sub, id, dto);
   }
 
+  @Patch('workouts/:id/items/:itemId/complete')
+  completeWorkoutItem(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.workoutsService.completeWorkoutItem(req.user.sub, id, itemId);
+  }
+
   @Delete('workouts/:id')
   deleteWorkout(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.workoutsService.deleteWorkout(req.user.sub, id);

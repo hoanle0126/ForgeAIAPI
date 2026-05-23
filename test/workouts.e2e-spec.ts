@@ -40,12 +40,16 @@ describe('Workouts API (e2e)', () => {
     data: {
       workout: {
         id: string;
+        status: string;
         title: string;
         items: Array<{
+          id: string;
           exerciseNameSnapshot: string;
           sets: Array<{
+            id: string;
             reps: number;
             restSeconds: number;
+            isCompleted: boolean;
           }>;
         }>;
       };
@@ -142,6 +146,27 @@ describe('Workouts API (e2e)', () => {
         restSeconds: 90,
       }),
     );
+
+    const workoutId = workoutBody.data.workout.id;
+    const workoutItemId = workoutBody.data.workout.items[0].id;
+    await request(app.getHttpServer())
+      .patch(`/workouts/${workoutId}/items/${workoutItemId}/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    const refreshedWorkoutResponse = await request(app.getHttpServer())
+      .get(`/workouts/${workoutId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    const refreshedWorkoutBody =
+      refreshedWorkoutResponse.body as WorkoutResponse;
+
+    expect(refreshedWorkoutBody.data.workout.status).toBe('completed');
+    expect(
+      refreshedWorkoutBody.data.workout.items[0].sets.every(
+        (set) => set.isCompleted,
+      ),
+    ).toBe(true);
   });
 
   it('rejects workout creation with another user personal exercise', async () => {

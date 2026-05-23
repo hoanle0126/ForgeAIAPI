@@ -19,6 +19,16 @@ export const workoutStatuses = [
   'archived',
 ] as const;
 
+export const workoutScheduleDays = [
+  'mo',
+  'tu',
+  'we',
+  'th',
+  'fr',
+  'sa',
+  'su',
+] as const;
+
 export const exerciseVisibilities = ['private', 'public', 'system'] as const;
 
 export const userExerciseVisibilities = ['private', 'public'] as const;
@@ -50,3 +60,4 @@ export type UserExerciseVisibilityDto =
   (typeof userExerciseVisibilities)[number];
 export type WorkoutGoalDto = (typeof workoutGoals)[number];
 export type WorkoutStatusDto = (typeof workoutStatuses)[number];
+export type WorkoutScheduleDayDto = (typeof workoutScheduleDays)[number];

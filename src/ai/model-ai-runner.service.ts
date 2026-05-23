@@ -22,8 +22,6 @@ export interface ModelAiWorkoutInput {
   session_minutes: number;
   experience_level: string;
   injuries?: string[];
-  allergies?: string[];
-  dietary_preferences?: string[];
   feedback?: {
     missed_workouts?: number;
     fatigue_level?: string;
@@ -31,12 +29,6 @@ export interface ModelAiWorkoutInput {
     completed_workouts?: number;
   };
   plan_type?: 'preview' | 'monthly';
-}
-
-interface ModelAiDailyMacroCoverage {
-  protein_ratio: number;
-  carb_ratio: number;
-  fat_ratio: number;
 }
 
 interface ModelAiReadinessAdjustment {
@@ -79,11 +71,6 @@ interface ModelAiCommonPlan {
   schema_version: string;
   model_version: string;
   goal_slug: string;
-  daily_calorie_target: number;
-  protein_target_g: number;
-  carb_target_g: number;
-  fat_target_g: number;
-  daily_macro_coverage: ModelAiDailyMacroCoverage;
   safety_notes: string[];
   coach_summary: string;
   coach_notes: string[];

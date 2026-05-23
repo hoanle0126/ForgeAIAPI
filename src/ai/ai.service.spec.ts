@@ -14,6 +14,7 @@ interface WorkoutPlanPreviewResult {
     workoutDraft: {
       title: string;
       isTemplate: boolean;
+      scheduledDays: string[];
       goal: string;
       durationMinutes: number;
       items: Array<{
@@ -49,6 +50,7 @@ interface MonthlyWorkoutPlanResult {
     workoutTemplateDrafts: Array<{
       title: string;
       isTemplate: boolean;
+      scheduledDays: string[];
     }>;
   };
 }
@@ -138,15 +140,6 @@ describe('AiService', () => {
       schema_version: 'coach-plan-v1',
       model_version: 'sklearn-random-forest-regressor',
       goal_slug: 'build_muscle',
-      daily_calorie_target: 2750,
-      protein_target_g: 180,
-      carb_target_g: 320,
-      fat_target_g: 80,
-      daily_macro_coverage: {
-        protein_ratio: 0.88,
-        carb_ratio: 0.91,
-        fat_ratio: 0.84,
-      },
       safety_notes: ['Start conservatively.', 'Use this as general guidance.'],
       coach_summary:
         'Weekly focus: build muscle with 6 training days and one protected recovery day.',
@@ -317,6 +310,7 @@ describe('AiService', () => {
       expect.objectContaining({
         title: 'Muscle Gain Chest Session',
         isTemplate: true,
+        scheduledDays: ['mo', 'tu', 'we', 'th', 'fr', 'sa'],
         goal: 'muscle_gain',
         durationMinutes: 30,
       }),
@@ -343,15 +337,6 @@ describe('AiService', () => {
       goal_slug: 'build_muscle',
       block_length_weeks: 4,
       training_days_per_week: 4,
-      daily_calorie_target: 2750,
-      protein_target_g: 180,
-      carb_target_g: 320,
-      fat_target_g: 80,
-      daily_macro_coverage: {
-        protein_ratio: 0.88,
-        carb_ratio: 0.91,
-        fat_ratio: 0.84,
-      },
       safety_notes: ['Start conservatively.', 'Use this as general guidance.'],
       coach_summary:
         '4-week block for build muscle with 4 training days per week.',
@@ -438,6 +423,9 @@ describe('AiService', () => {
       }),
     );
     expect(result.data.workoutTemplateDrafts).toHaveLength(4);
+    expect(
+      result.data.workoutTemplateDrafts.map((draft) => draft.scheduledDays),
+    ).toEqual([['mo'], ['tu'], ['th'], ['sa']]);
     expect(result.data.workoutTemplateDrafts[0]).toEqual(
       expect.objectContaining({
         title: 'Session A: Chest Focus',

@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { WorkoutStatus } from '@prisma/client';
 
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { CreateWorkoutDto } from './dto/create-workout.dto';
@@ -16,6 +17,14 @@ describe('WorkoutsService', () => {
     workout: {
       create: jest.Mock;
       findMany: jest.Mock;
+      update: jest.Mock;
+    };
+    workoutItem: {
+      findFirst: jest.Mock;
+      count: jest.Mock;
+    };
+    workoutSet: {
+      updateMany: jest.Mock;
     };
     $transaction: jest.Mock;
   };
@@ -32,6 +41,14 @@ describe('WorkoutsService', () => {
       workout: {
         create: jest.fn(),
         findMany: jest.fn(),
+        update: jest.fn(),
+      },
+      workoutItem: {
+        findFirst: jest.fn(),
+        count: jest.fn(),
+      },
+      workoutSet: {
+        updateMany: jest.fn(),
       },
       $transaction: jest.fn((callback: (tx: typeof prisma) => unknown) =>
         callback(prisma),
@@ -87,6 +104,7 @@ describe('WorkoutsService', () => {
       title: 'First lower body day',
       goal: 'strength',
       status: 'planned',
+      scheduledDays: ['fr', 'mo'],
       items: [
         {
           exerciseId: 'exercise-1',
@@ -117,6 +135,7 @@ describe('WorkoutsService', () => {
         data: {
           userId: string;
           title: string;
+          scheduledDays: string[];
           items: {
             create: Array<{
               exerciseId?: string;
@@ -132,6 +151,7 @@ describe('WorkoutsService', () => {
 
     expect(createArgs.data.userId).toBe(userId);
     expect(createArgs.data.title).toBe(dto.title);
+    expect(createArgs.data.scheduledDays).toEqual(['mo', 'fr']);
     expect(createArgs.data.items.create[0]).toEqual(
       expect.objectContaining({
         exerciseId: 'exercise-1',
@@ -154,5 +174,113 @@ describe('WorkoutsService', () => {
         ],
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('marks workout item sets as completed and updates workout status', async () => {
+    prisma.workoutItem.findFirst.mockResolvedValue({
+      id: 'item-1',
+      workoutId: 'workout-1',
+      sets: [{ id: 'set-1' }, { id: 'set-2' }],
+      workout: {
+        status: WorkoutStatus.planned,
+        scheduledDays: [],
+        updatedAt: new Date('2026-05-23T00:00:00.000Z'),
+      },
+    });
+    prisma.workoutSet.updateMany.mockResolvedValue({ count: 2 });
+    prisma.workoutItem.count.mockResolvedValue(0);
+    prisma.workout.update.mockResolvedValue({
+      status: WorkoutStatus.completed,
+    });
+
+    const result = await service.completeWorkoutItem(
+      userId,
+      'workout-1',
+      'item-1',
+    );
+
+    expect(prisma.workoutSet.updateMany).toHaveBeenCalledWith({
+      where: { workoutItemId: 'item-1' },
+      data: { isCompleted: true },
+    });
+    expect(prisma.workoutItem.count).toHaveBeenCalledWith({
+      where: {
+        workoutId: 'workout-1',
+        sets: { some: { isCompleted: false } },
+      },
+    });
+    expect(prisma.workout.update).toHaveBeenCalledWith({
+      where: { id: 'workout-1' },
+      data: { status: WorkoutStatus.completed },
+      select: { status: true },
+    });
+    expect(result.data.workoutStatus).toBe(WorkoutStatus.completed);
+    expect(result.data.completedSetCount).toBe(2);
+  });
+
+  it('throws not found when workout item is inaccessible', async () => {
+    prisma.workoutItem.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.completeWorkoutItem(userId, 'workout-1', 'missing-item'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('refreshes completed workout timestamp when finishing completed workout again', async () => {
+    prisma.workoutItem.findFirst.mockResolvedValue({
+      id: 'item-1',
+      workoutId: 'workout-1',
+      sets: [{ id: 'set-1' }],
+      workout: {
+        status: WorkoutStatus.completed,
+        scheduledDays: [],
+        updatedAt: new Date('2026-05-16T00:00:00.000Z'),
+      },
+    });
+    prisma.workoutSet.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workoutItem.count.mockResolvedValue(0);
+    prisma.workout.update.mockResolvedValue({
+      status: WorkoutStatus.completed,
+    });
+
+    await service.completeWorkoutItem(userId, 'workout-1', 'item-1');
+
+    expect(prisma.workout.update).toHaveBeenCalledWith({
+      where: { id: 'workout-1' },
+      data: { status: WorkoutStatus.completed },
+      select: { status: true },
+    });
+  });
+
+  it('resets recurring completed workout sets when a new week starts', async () => {
+    prisma.workoutItem.findFirst.mockResolvedValue({
+      id: 'item-1',
+      workoutId: 'workout-1',
+      sets: [{ id: 'set-1' }],
+      workout: {
+        status: WorkoutStatus.completed,
+        scheduledDays: ['mo'],
+        updatedAt: new Date('2026-05-10T00:00:00.000Z'),
+      },
+    });
+    prisma.workoutSet.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workout.update.mockResolvedValue({ status: WorkoutStatus.planned });
+    prisma.workoutItem.count.mockResolvedValue(1);
+
+    await service.completeWorkoutItem(userId, 'workout-1', 'item-1');
+
+    expect(prisma.workoutSet.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { workoutItem: { workoutId: 'workout-1' } },
+      data: { isCompleted: false },
+    });
+    expect(prisma.workoutSet.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { workoutItemId: 'item-1' },
+      data: { isCompleted: true },
+    });
+    expect(prisma.workout.update).toHaveBeenCalledWith({
+      where: { id: 'workout-1' },
+      data: { status: WorkoutStatus.planned },
+      select: { status: true },
+    });
   });
 });

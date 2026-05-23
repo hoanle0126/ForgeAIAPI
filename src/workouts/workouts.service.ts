@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Visibility } from '@prisma/client';
+import { Prisma, Visibility, WorkoutStatus } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
@@ -14,6 +14,14 @@ import { ListWorkoutsQueryDto } from './dto/list-workouts-query.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { UpdateWorkoutDto } from './dto/update-workout.dto';
 import { WorkoutItemDto } from './dto/workout-item.dto';
+import {
+  workoutScheduleDays,
+  type WorkoutScheduleDayDto,
+} from './dto/workout.enums';
+
+const workoutScheduleDayRanking = new Map(
+  workoutScheduleDays.map((day, index) => [day, index]),
+);
 
 @Injectable()
 export class WorkoutsService {
@@ -159,6 +167,78 @@ export class WorkoutsService {
       });
 
       return { message: 'Workout updated successfully', data: { workout } };
+    });
+  }
+
+  async completeWorkoutItem(userId: string, id: string, itemId: string) {
+    const workoutItem = await this.prisma.workoutItem.findFirst({
+      where: {
+        id: itemId,
+        workoutId: id,
+        workout: { userId, deletedAt: null },
+      },
+      include: {
+        sets: { select: { id: true } },
+        workout: {
+          select: { status: true, scheduledDays: true, updatedAt: true },
+        },
+      },
+    });
+
+    if (!workoutItem) {
+      throw new NotFoundException('Workout exercise not found');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      let workoutStatus = workoutItem.workout.status;
+
+      if (this.shouldResetRecurringCompletion(workoutItem.workout)) {
+        await tx.workoutSet.updateMany({
+          where: { workoutItem: { workoutId: id } },
+          data: { isCompleted: false },
+        });
+
+        const resetWorkout = await tx.workout.update({
+          where: { id },
+          data: { status: WorkoutStatus.planned },
+          select: { status: true },
+        });
+        workoutStatus = resetWorkout.status;
+      }
+
+      await tx.workoutSet.updateMany({
+        where: { workoutItemId: itemId },
+        data: { isCompleted: true },
+      });
+
+      const incompleteItemCount = await tx.workoutItem.count({
+        where: {
+          workoutId: id,
+          sets: { some: { isCompleted: false } },
+        },
+      });
+
+      if (incompleteItemCount === 0) {
+        const updatedWorkout = await tx.workout.update({
+          where: { id },
+          data: { status: WorkoutStatus.completed },
+          select: { status: true },
+        });
+        workoutStatus = updatedWorkout.status;
+      }
+
+      const totalSetCount = workoutItem.sets.length;
+
+      return {
+        message: 'Workout exercise marked as completed',
+        data: {
+          workoutId: id,
+          workoutItemId: itemId,
+          totalSetCount,
+          completedSetCount: totalSetCount,
+          workoutStatus,
+        },
+      };
     });
   }
 
@@ -352,6 +432,32 @@ export class WorkoutsService {
     }
   }
 
+  private shouldResetRecurringCompletion(workout: {
+    status: WorkoutStatus;
+    scheduledDays: string[];
+    updatedAt: Date;
+  }) {
+    if (workout.status !== WorkoutStatus.completed) return false;
+    if (workout.scheduledDays.length === 0) return false;
+    return !this.isDateInCurrentWeek(workout.updatedAt);
+  }
+
+  private isDateInCurrentWeek(date: Date) {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const weekEndExclusive = new Date(weekStart);
+    weekEndExclusive.setDate(weekStart.getDate() + 7);
+
+    const target = new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+    );
+    return target >= weekStart && target < weekEndExclusive;
+  }
+
   private cleanCreateExerciseData(dto: CreateExerciseDto) {
     return {
       name: dto.name.trim(),
@@ -400,6 +506,9 @@ export class WorkoutsService {
       ...(dto.scheduledFor !== undefined
         ? { scheduledFor: dto.scheduledFor }
         : {}),
+      ...(dto.scheduledDays !== undefined
+        ? { scheduledDays: this.normalizeScheduledDays(dto.scheduledDays) }
+        : {}),
       ...(dto.durationMinutes !== undefined
         ? { durationMinutes: dto.durationMinutes }
         : {}),
@@ -416,11 +525,21 @@ export class WorkoutsService {
       description: dto.description?.trim(),
       isTemplate: dto.isTemplate ?? false,
       scheduledFor: dto.scheduledFor,
+      scheduledDays: this.normalizeScheduledDays(dto.scheduledDays ?? []),
       durationMinutes: dto.durationMinutes,
       difficulty: dto.difficulty,
       goal: dto.goal,
       status: dto.status,
       notes: dto.notes?.trim(),
     };
+  }
+
+  private normalizeScheduledDays(days: WorkoutScheduleDayDto[]) {
+    return [...new Set(days)].sort((left, right) => {
+      return (
+        workoutScheduleDayRanking.get(left)! -
+        workoutScheduleDayRanking.get(right)!
+      );
+    });
   }
 }
