@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Visibility } from '@prisma/client';
 
 import { BuildMonthlyWorkoutPlanDto } from './dto/build-monthly-workout-plan.dto';
@@ -8,11 +8,19 @@ import {
   BuildWorkoutPlanDto,
 } from './dto/build-workout-plan.dto';
 import {
+  ModelAiInsightChatReply,
   ModelAiMonthlyWorkoutPlan,
   ModelAiRunnerService,
   ModelAiWorkoutTemplate,
   ModelAiWorkoutPlan,
 } from './model-ai-runner.service';
+import { InsightChatDto } from './dto/insight-chat.dto';
+import {
+  buildInsightChatReply,
+  buildInsightOverview,
+  type InsightOverview,
+  type InsightWorkout,
+} from './insight-engine';
 import { PrismaService } from '../prisma/prisma.service';
 
 const weekOrder: AiTrainingDay[] = ['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su'];
@@ -61,6 +69,8 @@ type WorkoutDraftSetTemplate = {
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly modelAiRunner: ModelAiRunnerService,
@@ -90,6 +100,121 @@ export class AiService {
       message: 'AI exercise dataset fetched successfully',
       data: { exercises },
     };
+  }
+
+  async getInsightsOverview(userId: string) {
+    const overview = await this.buildInsightsOverview(userId);
+
+    return {
+      message: 'AI insights overview fetched successfully',
+      data: { overview },
+    };
+  }
+
+  async sendInsightChatMessage(userId: string, dto: InsightChatDto) {
+    const prompt = dto.prompt.trim();
+    const overview = await this.buildInsightsOverview(userId);
+    const selectedAnalysis = this.resolveInsightMuscleAnalysis(
+      overview,
+      dto.muscleId,
+    );
+    const fallbackReply = buildInsightChatReply({
+      prompt,
+      selectedMuscleId: selectedAnalysis.muscleId,
+      overview,
+    });
+    let reply = fallbackReply;
+
+    try {
+      const modelReply = await this.modelAiRunner.buildInsightChatReply({
+        prompt,
+        selected_muscle_id: selectedAnalysis.muscleId,
+        selected_muscle_name: selectedAnalysis.displayName,
+        selected_status: selectedAnalysis.status,
+        selected_trend_percent: this.normalizeInsightNumber(
+          selectedAnalysis.trendPercent,
+        ),
+        selected_fatigue_score: this.normalizeInsightNumber(
+          selectedAnalysis.fatigueScore,
+        ),
+        selected_recommendation: selectedAnalysis.recommendation,
+        selected_top_exercises: selectedAnalysis.exerciseContributions
+          .slice(0, 4)
+          .map((entry) => entry.exerciseName),
+        high_load_muscles: overview.muscleAnalyses
+          .filter((analysis) => analysis.status === 'overloaded')
+          .map((analysis) => analysis.displayName)
+          .slice(0, 4),
+        recovered_muscles: overview.muscleAnalyses
+          .filter((analysis) => analysis.status === 'recovered')
+          .map((analysis) => analysis.displayName)
+          .slice(0, 4),
+      });
+      reply = this.buildInsightReplyFromModelResponse(
+        modelReply,
+        fallbackReply,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Insight chat fallback used because model_ai failed: ${(error as Error).message}`,
+      );
+    }
+
+    return {
+      message: 'AI insight chat response generated successfully',
+      data: { reply },
+    };
+  }
+
+  private resolveInsightMuscleAnalysis(
+    overview: InsightOverview,
+    requestedMuscleId?: string,
+  ): InsightOverview['muscleAnalyses'][number] {
+    return (
+      overview.muscleAnalyses.find(
+        (analysis) => analysis.muscleId === requestedMuscleId,
+      ) ??
+      overview.muscleAnalyses.find(
+        (analysis) => analysis.muscleId === overview.selectedMuscleId,
+      ) ??
+      overview.muscleAnalyses[0] ?? {
+        muscleId: requestedMuscleId ?? overview.selectedMuscleId,
+        displayName: 'Unknown muscle',
+        status: 'neutral',
+        volume: 0,
+        rpe: 0,
+        trendPercent: 0,
+        fatigueScore: 0,
+        recommendation: 'No analysis is available for this muscle yet.',
+        loadTrend: [],
+        exerciseContributions: [],
+        recoveryBalance: [],
+      }
+    );
+  }
+
+  private buildInsightReplyFromModelResponse(
+    modelReply: ModelAiInsightChatReply,
+    fallbackReply: ReturnType<typeof buildInsightChatReply>,
+  ) {
+    const content = modelReply.content.trim();
+    if (!content) {
+      return fallbackReply;
+    }
+
+    return {
+      id: new Date().toISOString(),
+      content,
+      isUser: false,
+      hasChart: modelReply.has_chart ?? true,
+    };
+  }
+
+  private normalizeInsightNumber(value: number) {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    return Number(value.toFixed(2));
   }
 
   async buildWorkoutPlanPreview(
@@ -670,6 +795,77 @@ export class AiService {
           };
         }),
       };
+    });
+  }
+
+  private async buildInsightsOverview(userId: string) {
+    const [workouts, exercises] = await Promise.all([
+      this.prisma.workout.findMany({
+        where: {
+          userId,
+          deletedAt: null,
+          isTemplate: false,
+        },
+        include: {
+          items: {
+            orderBy: { order: 'asc' },
+            include: {
+              sets: {
+                orderBy: { order: 'asc' },
+                select: {
+                  reps: true,
+                  weightKg: true,
+                  durationSeconds: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ scheduledFor: 'asc' }, { createdAt: 'desc' }],
+      }),
+      this.prisma.exercise.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            { visibility: { in: [Visibility.system, Visibility.public] } },
+            { ownerId: userId },
+          ],
+        },
+        select: {
+          id: true,
+          muscleGroups: true,
+        },
+      }),
+    ]);
+
+    const exerciseMuscleGroupsById = new Map(
+      exercises.map((exercise) => [
+        exercise.id,
+        exercise.muscleGroups
+          .map((group) => group.trim().toLowerCase())
+          .filter(Boolean),
+      ]),
+    );
+    const insightWorkouts: InsightWorkout[] = workouts.map((workout) => ({
+      status: workout.status,
+      isTemplate: workout.isTemplate,
+      scheduledFor: workout.scheduledFor,
+      updatedAt: workout.updatedAt,
+      createdAt: workout.createdAt,
+      items: workout.items.map((item) => ({
+        exerciseId: item.exerciseId,
+        exerciseNameSnapshot: item.exerciseNameSnapshot,
+        sets: item.sets.map((set) => ({
+          reps: set.reps,
+          weightKg: set.weightKg,
+          durationSeconds: set.durationSeconds,
+        })),
+      })),
+    }));
+
+    return buildInsightOverview({
+      workouts: insightWorkouts,
+      exerciseMuscleGroupsById,
     });
   }
 

@@ -1,5 +1,8 @@
 import { AiService } from './ai.service';
-import { ModelAiRunnerService } from './model-ai-runner.service';
+import {
+  type ModelAiInsightChatInput,
+  ModelAiRunnerService,
+} from './model-ai-runner.service';
 
 interface WorkoutPlanPreviewResult {
   data: {
@@ -60,10 +63,14 @@ describe('AiService', () => {
     exercise: {
       findMany: jest.Mock;
     };
+    workout: {
+      findMany: jest.Mock;
+    };
   };
   let modelAiRunner: {
     buildWorkoutPlan: jest.Mock;
     buildMonthlyWorkoutPlan: jest.Mock;
+    buildInsightChatReply: jest.Mock;
   };
   let service: AiService;
 
@@ -72,10 +79,14 @@ describe('AiService', () => {
       exercise: {
         findMany: jest.fn(),
       },
+      workout: {
+        findMany: jest.fn(),
+      },
     };
     modelAiRunner = {
       buildWorkoutPlan: jest.fn(),
       buildMonthlyWorkoutPlan: jest.fn(),
+      buildInsightChatReply: jest.fn(),
     };
 
     service = new AiService(
@@ -439,6 +450,165 @@ describe('AiService', () => {
         templateId: 'session_1',
       }),
     );
+  });
+
+  it('builds insight overview from workout and exercise data', async () => {
+    prisma.workout.findMany.mockResolvedValue([
+      {
+        status: 'completed',
+        isTemplate: false,
+        scheduledFor: new Date('2026-05-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-22T00:00:00.000Z'),
+        createdAt: new Date('2026-05-22T00:00:00.000Z'),
+        items: [
+          {
+            exerciseId: 'exercise-chest',
+            exerciseNameSnapshot: 'Bench Press',
+            sets: [
+              { reps: 10, weightKg: 40, durationSeconds: null },
+              { reps: 8, weightKg: 42, durationSeconds: null },
+            ],
+          },
+          {
+            exerciseId: 'exercise-back',
+            exerciseNameSnapshot: 'Seated Row',
+            sets: [{ reps: 12, weightKg: 32, durationSeconds: null }],
+          },
+        ],
+      },
+    ]);
+    prisma.exercise.findMany.mockResolvedValue([
+      { id: 'exercise-chest', muscleGroups: ['chest', 'arms'] },
+      { id: 'exercise-back', muscleGroups: ['back', 'arms'] },
+    ]);
+
+    const result = await service.getInsightsOverview('user-1');
+
+    expect(prisma.workout.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user-1',
+        deletedAt: null,
+        isTemplate: false,
+      },
+      include: {
+        items: {
+          orderBy: { order: 'asc' },
+          include: {
+            sets: {
+              orderBy: { order: 'asc' },
+              select: {
+                reps: true,
+                weightKg: true,
+                durationSeconds: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ scheduledFor: 'asc' }, { createdAt: 'desc' }],
+    });
+    expect(result.message).toBe('AI insights overview fetched successfully');
+    expect(result.data.overview.selectedMuscleId).toBeTruthy();
+    expect(result.data.overview.muscleData.length).toBeGreaterThanOrEqual(3);
+    expect(typeof result.data.overview.muscleAnalyses[0].status).toBe('string');
+    expect(result.data.overview.muscleAnalyses[0].recommendation).toBeTruthy();
+  });
+
+  it('builds insight chat reply from model_ai using selected muscle context', async () => {
+    prisma.workout.findMany.mockResolvedValue([
+      {
+        status: 'completed',
+        isTemplate: false,
+        scheduledFor: new Date('2026-05-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-22T00:00:00.000Z'),
+        createdAt: new Date('2026-05-22T00:00:00.000Z'),
+        items: [
+          {
+            exerciseId: 'exercise-chest',
+            exerciseNameSnapshot: 'Bench Press',
+            sets: [{ reps: 10, weightKg: 40, durationSeconds: null }],
+          },
+        ],
+      },
+    ]);
+    prisma.exercise.findMany.mockResolvedValue([
+      { id: 'exercise-chest', muscleGroups: ['chest'] },
+    ]);
+    modelAiRunner.buildInsightChatReply.mockResolvedValue({
+      content:
+        'Chest is in a productive zone this week. Keep volume stable for the next session.',
+      has_chart: true,
+      model_version: 'forgeai-insight-chat-v1',
+    });
+
+    const result = await service.sendInsightChatMessage('user-1', {
+      prompt: 'what should i train next',
+      muscleId: 'pectoralis_major_r',
+    });
+
+    expect(modelAiRunner.buildInsightChatReply).toHaveBeenCalledTimes(1);
+    const chatCalls = modelAiRunner.buildInsightChatReply.mock.calls as Array<
+      [ModelAiInsightChatInput]
+    >;
+    const callPayload = chatCalls[0][0];
+    expect(callPayload.prompt).toBe('what should i train next');
+    expect(callPayload.selected_muscle_id).toBe('pectoralis_major_r');
+    expect(callPayload.selected_muscle_name).toBe('Chest (R)');
+    expect(typeof callPayload.selected_status).toBe('string');
+    expect(typeof callPayload.selected_trend_percent).toBe('number');
+    expect(typeof callPayload.selected_fatigue_score).toBe('number');
+    expect(callPayload.selected_recommendation).toBeTruthy();
+    expect(result.message).toBe(
+      'AI insight chat response generated successfully',
+    );
+    expect(result.data.reply).toEqual(
+      expect.objectContaining({
+        isUser: false,
+        hasChart: true,
+      }),
+    );
+    expect(result.data.reply.content).toContain('productive zone');
+  });
+
+  it('falls back to insight-engine chat reply when model_ai chat fails', async () => {
+    prisma.workout.findMany.mockResolvedValue([
+      {
+        status: 'completed',
+        isTemplate: false,
+        scheduledFor: new Date('2026-05-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-05-22T00:00:00.000Z'),
+        createdAt: new Date('2026-05-22T00:00:00.000Z'),
+        items: [
+          {
+            exerciseId: 'exercise-chest',
+            exerciseNameSnapshot: 'Bench Press',
+            sets: [{ reps: 10, weightKg: 40, durationSeconds: null }],
+          },
+        ],
+      },
+    ]);
+    prisma.exercise.findMany.mockResolvedValue([
+      { id: 'exercise-chest', muscleGroups: ['chest'] },
+    ]);
+    modelAiRunner.buildInsightChatReply.mockRejectedValue(
+      new Error('python service timeout'),
+    );
+
+    const result = await service.sendInsightChatMessage('user-1', {
+      prompt: 'what should i train next',
+      muscleId: 'pectoralis_major_r',
+    });
+
+    expect(result.message).toBe(
+      'AI insight chat response generated successfully',
+    );
+    expect(result.data.reply).toEqual(
+      expect.objectContaining({
+        isUser: false,
+        hasChart: true,
+      }),
+    );
+    expect(result.data.reply.content).toContain('what should i train next');
   });
 
   function mockedTemplate(templateId: string, title: string, focus: string) {

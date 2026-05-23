@@ -31,6 +31,27 @@ export interface ModelAiWorkoutInput {
   plan_type?: 'preview' | 'monthly';
 }
 
+export interface ModelAiInsightChatInput {
+  prompt: string;
+  selected_muscle_id: string;
+  selected_muscle_name: string;
+  selected_status: string;
+  selected_trend_percent: number;
+  selected_fatigue_score: number;
+  selected_recommendation: string;
+  selected_top_exercises: string[];
+  high_load_muscles: string[];
+  recovered_muscles: string[];
+  plan_type?: 'insight_chat';
+}
+
+export interface ModelAiInsightChatReply {
+  content: string;
+  has_chart?: boolean;
+  model_version?: string;
+  suggested_exercises?: string[];
+}
+
 interface ModelAiReadinessAdjustment {
   intensity_modifier: string;
   reason: string;
@@ -133,7 +154,14 @@ export class ModelAiRunnerService {
     });
   }
 
-  private async runModel<T>(payload: ModelAiWorkoutInput): Promise<T> {
+  async buildInsightChatReply(payload: ModelAiInsightChatInput) {
+    return this.runModel<ModelAiInsightChatReply>({
+      ...payload,
+      plan_type: 'insight_chat',
+    });
+  }
+
+  private async runModel<T>(payload: Record<string, unknown>): Promise<T> {
     const pythonBin = process.env.MODEL_AI_PYTHON_BIN || 'python3';
     const scriptPath = this.resolveScriptPath();
     const encodedPayload = Buffer.from(
@@ -185,6 +213,7 @@ export class ModelAiRunnerService {
       return JSON.parse(stdout) as
         | ModelAiWorkoutPlan
         | ModelAiMonthlyWorkoutPlan
+        | ModelAiInsightChatReply
         | { error: string };
     } catch (error) {
       this.logger.error(

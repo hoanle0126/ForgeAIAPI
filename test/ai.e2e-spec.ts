@@ -77,6 +77,50 @@ describe('AI workout builder API (e2e)', () => {
     };
   }
 
+  interface InsightOverviewResponse {
+    message: string;
+    data: {
+      overview: {
+        selectedMuscleId: string;
+        muscleData: Array<{
+          id: string;
+          volume: number;
+          status: string;
+        }>;
+        muscleAnalyses: Array<{
+          muscleId: string;
+          displayName: string;
+          recommendation: string;
+        }>;
+        messages: Array<{
+          id: string;
+          content: string;
+          isUser: boolean;
+        }>;
+      };
+    };
+  }
+
+  interface InsightChatResponse {
+    message: string;
+    data: {
+      reply: {
+        id: string;
+        content: string;
+        isUser: boolean;
+        hasChart: boolean;
+      };
+    };
+  }
+
+  interface ExerciseCreateResponse {
+    data: {
+      exercise: {
+        id: string;
+      };
+    };
+  }
+
   beforeEach(async () => {
     await prisma.workoutSet.deleteMany();
     await prisma.workoutItem.deleteMany();
@@ -247,6 +291,101 @@ describe('AI workout builder API (e2e)', () => {
       .expect(400);
   });
 
+  it('returns insight overview from backend data', async () => {
+    const accessToken = await registerAndGetAccessToken(
+      'insight-overview@example.com',
+    );
+
+    const exerciseResponse = await request(app.getHttpServer())
+      .post('/exercises')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        name: 'Bench Press',
+        muscleGroups: ['chest', 'arms'],
+        equipment: 'barbell',
+        difficulty: 'beginner',
+      })
+      .expect(201);
+    const exerciseBody = exerciseResponse.body as ExerciseCreateResponse;
+    const exerciseId = exerciseBody.data.exercise.id;
+    expect(exerciseId).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .post('/workouts')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        title: 'Push day',
+        status: 'completed',
+        items: [
+          {
+            exerciseId,
+            order: 1,
+            sets: [
+              { order: 1, reps: 10, weightKg: 40 },
+              { order: 2, reps: 8, weightKg: 42 },
+            ],
+          },
+        ],
+      })
+      .expect(201);
+
+    const response = await request(app.getHttpServer())
+      .get('/ai/insights/overview')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    const body = response.body as InsightOverviewResponse;
+
+    expect(body.message).toBe('AI insights overview fetched successfully');
+    expect(body.data.overview.selectedMuscleId).toBeTruthy();
+    expect(body.data.overview.muscleData.length).toBeGreaterThan(0);
+    expect(body.data.overview.muscleAnalyses[0].recommendation).toBeTruthy();
+    expect(body.data.overview.messages[0].isUser).toBe(false);
+  });
+
+  it('returns insight chat response from backend endpoint', async () => {
+    const accessToken = await registerAndGetAccessToken(
+      'insight-chat@example.com',
+    );
+
+    const overviewResponse = await request(app.getHttpServer())
+      .get('/ai/insights/overview')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    const overviewBody = overviewResponse.body as InsightOverviewResponse;
+
+    const response = await request(app.getHttpServer())
+      .post('/ai/insights/chat')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        prompt: 'what should i train next',
+        muscleId: overviewBody.data.overview.selectedMuscleId,
+      })
+      .expect(201);
+    const body = response.body as InsightChatResponse;
+
+    expect(body.message).toBe(
+      'AI insight chat response generated successfully',
+    );
+    expect(body.data.reply.isUser).toBe(false);
+    expect(body.data.reply.hasChart).toBe(true);
+    expect(body.data.reply.content).toContain('You asked:');
+    expect(body.data.reply.content).toContain('what should i train next');
+  });
+
+  it('rejects insight chat payload with empty prompt', async () => {
+    const accessToken = await registerAndGetAccessToken(
+      'insight-chat-invalid@example.com',
+    );
+
+    await request(app.getHttpServer())
+      .post('/ai/insights/chat')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        prompt: '',
+      })
+      .expect(400);
+  });
+
   it('requires authentication for AI workout builder preview', async () => {
     await request(app.getHttpServer())
       .post('/ai/workout-builder/preview')
@@ -260,6 +399,19 @@ describe('AI workout builder API (e2e)', () => {
         trainingDays: ['mo'],
         sessionMinutes: 45,
         preferredTime: 'evening',
+      })
+      .expect(401);
+  });
+
+  it('requires authentication for insight overview', async () => {
+    await request(app.getHttpServer()).get('/ai/insights/overview').expect(401);
+  });
+
+  it('requires authentication for insight chat', async () => {
+    await request(app.getHttpServer())
+      .post('/ai/insights/chat')
+      .send({
+        prompt: 'test',
       })
       .expect(401);
   });
