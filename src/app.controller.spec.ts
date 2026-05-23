@@ -19,4 +19,25 @@ describe('AppController', () => {
       expect(appController.getHello()).toBe('Hello World!');
     });
   });
+
+  describe('dashboard home', () => {
+    it('should return dashboard home summary payload', () => {
+      expect(appController.getDashboardHome()).toEqual(
+        expect.objectContaining({
+          message: expect.any(String),
+          data: expect.objectContaining({
+            home: expect.objectContaining({
+              greetingLine: expect.any(String),
+              athleteAlias: expect.any(String),
+              readinessScore: expect.any(Number),
+              readinessMessage: expect.any(String),
+              volumeValue: expect.any(String),
+              volumeUnit: expect.any(String),
+              streakDays: expect.any(Number),
+            }),
+          }),
+        }),
+      );
+    });
+  });
 });
