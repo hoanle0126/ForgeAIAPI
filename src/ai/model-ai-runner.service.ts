@@ -3,10 +3,11 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -137,8 +138,13 @@ export interface ModelAiMonthlyWorkoutPlan extends ModelAiCommonPlan {
 }
 
 @Injectable()
-export class ModelAiRunnerService {
+export class ModelAiRunnerService implements OnModuleInit {
   private readonly logger = new Logger(ModelAiRunnerService.name);
+  private runtime?: { pythonBin: string; scriptPath: string };
+
+  onModuleInit() {
+    this.runtime = this.resolveRuntime();
+  }
 
   async buildWorkoutPlan(payload: ModelAiWorkoutInput) {
     return this.runModel<ModelAiWorkoutPlan>({
@@ -162,8 +168,7 @@ export class ModelAiRunnerService {
   }
 
   private async runModel<T>(payload: Record<string, unknown>): Promise<T> {
-    const pythonBin = process.env.MODEL_AI_PYTHON_BIN || 'python3';
-    const scriptPath = this.resolveScriptPath();
+    const runtime = this.runtime ?? this.resolveRuntime();
     const encodedPayload = Buffer.from(
       JSON.stringify(payload),
       'utf-8',
@@ -174,8 +179,8 @@ export class ModelAiRunnerService {
 
     try {
       const result = await execFileAsync(
-        pythonBin,
-        [scriptPath, encodedPayload],
+        runtime.pythonBin,
+        [runtime.scriptPath, encodedPayload],
         {
           timeout: 20_000,
           maxBuffer: 2 * 1024 * 1024,
@@ -225,20 +230,22 @@ export class ModelAiRunnerService {
     }
   }
 
-  private resolveScriptPath() {
-    const candidates = [
-      join(__dirname, '../../../model_ai/workout_builder_cli.py'),
-      join(process.cwd(), '../model_ai/workout_builder_cli.py'),
-      join(process.cwd(), 'model_ai/workout_builder_cli.py'),
-    ];
-    const scriptPath = candidates.find((candidate) => existsSync(candidate));
+  private resolveRuntime() {
+    const pythonBin = process.env.MODEL_AI_PYTHON_BIN?.trim() || 'python3';
+    const configuredRoot = process.env.MODEL_AI_ROOT?.trim();
+    const modelAiRoot = configuredRoot
+      ? resolve(configuredRoot)
+      : resolve(process.cwd(), '..', 'model_ai');
+    const scriptPath = resolve(modelAiRoot, 'workout_builder_cli.py');
+    const artifactsPath = resolve(modelAiRoot, 'recommender_artifacts.json');
 
-    if (!scriptPath) {
-      throw new Error(
-        `model_ai CLI not found. Checked: ${candidates.join(', ')}`,
-      );
+    if (!existsSync(scriptPath)) {
+      throw new Error(`model_ai CLI not found at ${scriptPath}`);
+    }
+    if (!existsSync(artifactsPath)) {
+      throw new Error(`model_ai artifacts not found at ${artifactsPath}`);
     }
 
-    return scriptPath;
+    return { pythonBin, scriptPath };
   }
 }

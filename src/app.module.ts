@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AiModule } from './ai/ai.module';
 import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { ProfileModule } from './profile/profile.module';
 import { WorkoutsModule } from './workouts/workouts.module';
 
 @Module({
@@ -12,6 +13,7 @@ import { WorkoutsModule } from './workouts/workouts.module';
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     AuthModule,
+    ProfileModule,
     WorkoutsModule,
     AiModule,
   ],

@@ -24,26 +24,7 @@ describe('AppController (e2e)', () => {
   });
 
   it('/dashboard/home (GET)', async () => {
-    const response = await request(app.getHttpServer())
-      .get('/dashboard/home')
-      .expect(200);
-
-    expect(response.body).toEqual(
-      expect.objectContaining({
-        message: expect.any(String),
-        data: expect.objectContaining({
-          home: expect.objectContaining({
-            greetingLine: expect.any(String),
-            athleteAlias: expect.any(String),
-            readinessScore: expect.any(Number),
-            readinessMessage: expect.any(String),
-            volumeValue: expect.any(String),
-            volumeUnit: expect.any(String),
-            streakDays: expect.any(Number),
-          }),
-        }),
-      }),
-    );
+    await request(app.getHttpServer()).get('/dashboard/home').expect(401);
   });
 
   afterEach(async () => {

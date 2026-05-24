@@ -1,5 +1,9 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AppService } from './app.service';
+
+type AuthenticatedRequest = { user: { sub: string } };
 
 @Controller()
 export class AppController {
@@ -10,8 +14,9 @@ export class AppController {
     return this.appService.getHello();
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('dashboard/home')
-  getDashboardHome() {
-    return this.appService.getDashboardHome();
+  getDashboardHome(@Req() req: AuthenticatedRequest) {
+    return this.appService.getDashboardHome(req.user.sub);
   }
 }

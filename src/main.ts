@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  validateEnvironment();
   const app = await NestFactory.create(AppModule);
   const port = process.env.PORT ?? 5000;
 
@@ -52,3 +53,14 @@ async function bootstrap() {
   Logger.log(`Backend is running on http://localhost:${port}`, 'Bootstrap');
 }
 void bootstrap();
+
+function validateEnvironment() {
+  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
+  const missing = required.filter((key) => !process.env[key]?.trim());
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(', ')}`,
+    );
+  }
+}
