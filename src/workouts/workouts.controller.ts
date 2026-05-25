@@ -18,6 +18,7 @@ import { ListExercisesQueryDto } from './dto/list-exercises-query.dto';
 import { ListWorkoutsQueryDto } from './dto/list-workouts-query.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { UpdateWorkoutDto } from './dto/update-workout.dto';
+import { CompleteWorkoutDto } from './dto/complete-workout.dto';
 import { WorkoutsService } from './workouts.service';
 
 type AuthenticatedRequest = { user: { sub: string } };
@@ -94,6 +95,15 @@ export class WorkoutsController {
     @Param('itemId') itemId: string,
   ) {
     return this.workoutsService.completeWorkoutItem(req.user.sub, id, itemId);
+  }
+
+  @Post('workouts/:id/complete')
+  completeWorkout(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: CompleteWorkoutDto,
+  ) {
+    return this.workoutsService.completeWorkout(req.user.sub, id, dto);
   }
 
   @Delete('workouts/:id')

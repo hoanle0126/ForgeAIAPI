@@ -14,6 +14,7 @@ import { ListWorkoutsQueryDto } from './dto/list-workouts-query.dto';
 import { UpdateExerciseDto } from './dto/update-exercise.dto';
 import { UpdateWorkoutDto } from './dto/update-workout.dto';
 import { WorkoutItemDto } from './dto/workout-item.dto';
+import { CompleteWorkoutDto } from './dto/complete-workout.dto';
 import {
   workoutScheduleDays,
   type WorkoutScheduleDayDto,
@@ -237,6 +238,132 @@ export class WorkoutsService {
           totalSetCount,
           completedSetCount: totalSetCount,
           workoutStatus,
+        },
+      };
+    });
+  }
+
+  async completeWorkout(userId: string, id: string, dto: CompleteWorkoutDto) {
+    const workout = await this.prisma.workout.findFirst({
+      where: { id, userId, deletedAt: null },
+      include: {
+        items: {
+          include: { sets: true },
+        },
+      },
+    });
+
+    if (!workout) {
+      throw new NotFoundException('Workout not found');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create WorkoutCompletion record
+      const completion = await tx.workoutCompletion.create({
+        data: {
+          userId,
+          workoutId: id,
+          effort: dto.effort,
+          notes: dto.notes?.trim(),
+          sorenessAreas: dto.sorenessAreas ?? [],
+          durationSeconds: dto.durationSeconds,
+          aiAdjusted: dto.difficultyAdjustment !== 'maintain',
+        },
+      });
+
+      // 2. Mark all sets as completed
+      await tx.workoutSet.updateMany({
+        where: { workoutItem: { workoutId: id } },
+        data: { isCompleted: true },
+      });
+
+      // 3. Mark workout as completed
+      await tx.workout.update({
+        where: { id },
+        data: { status: WorkoutStatus.completed },
+      });
+
+      // 4. Adapt/adjust exercise difficulty (reps, weights, times)
+      if (dto.difficultyAdjustment !== 'maintain') {
+        const factor = dto.difficultyAdjustment === 'increase' ? 1.1 : 0.9;
+        const repOffset = dto.difficultyAdjustment === 'increase' ? 1 : -1;
+
+        for (const item of workout.items) {
+          for (const set of item.sets) {
+            let updatedWeight = set.weightKg;
+            let updatedReps = set.reps;
+            let updatedDuration = set.durationSeconds;
+
+            if (set.weightKg && set.weightKg > 0) {
+              if (dto.difficultyAdjustment === 'increase') {
+                const calculated = set.weightKg * factor;
+                // Round to nearest 0.5kg
+                updatedWeight = Math.round(calculated * 2) / 2;
+                // If it didn't increase due to rounding, add 0.5kg
+                if (updatedWeight <= set.weightKg) {
+                  updatedWeight += 0.5;
+                }
+              } else {
+                const calculated = set.weightKg * factor;
+                updatedWeight = Math.max(0.5, Math.round(calculated * 2) / 2);
+                if (updatedWeight >= set.weightKg && set.weightKg > 0.5) {
+                  updatedWeight -= 0.5;
+                }
+              }
+            }
+
+            if (set.reps && set.reps > 0) {
+              updatedReps = Math.max(1, set.reps + repOffset);
+            }
+
+            if (set.durationSeconds && set.durationSeconds > 0) {
+              if (dto.difficultyAdjustment === 'increase') {
+                updatedDuration = Math.round(set.durationSeconds * factor);
+                if (updatedDuration <= set.durationSeconds) {
+                  updatedDuration += 5;
+                }
+              } else {
+                updatedDuration = Math.max(5, Math.round(set.durationSeconds * factor));
+                if (updatedDuration >= set.durationSeconds && set.durationSeconds > 5) {
+                  updatedDuration -= 5;
+                }
+              }
+            }
+
+            await tx.workoutSet.update({
+              where: { id: set.id },
+              data: {
+                weightKg: updatedWeight,
+                reps: updatedReps,
+                durationSeconds: updatedDuration,
+              },
+            });
+          }
+        }
+
+        // 5. Update overall workout difficulty level
+        let newDifficulty = workout.difficulty;
+        if (dto.difficultyAdjustment === 'increase') {
+          if (workout.difficulty === 'beginner') newDifficulty = 'intermediate';
+          else if (workout.difficulty === 'intermediate') newDifficulty = 'advanced';
+        } else if (dto.difficultyAdjustment === 'decrease') {
+          if (workout.difficulty === 'advanced') newDifficulty = 'intermediate';
+          else if (workout.difficulty === 'intermediate') newDifficulty = 'beginner';
+        }
+
+        if (newDifficulty !== workout.difficulty) {
+          await tx.workout.update({
+            where: { id },
+            data: { difficulty: newDifficulty },
+          });
+        }
+      }
+
+      return {
+        message: 'Workout completed and feedback processed successfully',
+        data: {
+          completion,
+          difficultyAdjustment: dto.difficultyAdjustment,
         },
       };
     });
