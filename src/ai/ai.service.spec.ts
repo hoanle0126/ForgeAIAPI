@@ -65,6 +65,11 @@ describe('AiService', () => {
     };
     workout: {
       findMany: jest.Mock;
+      count: jest.Mock;
+    };
+    workoutCompletion: {
+      count: jest.Mock;
+      findMany: jest.Mock;
     };
   };
   let modelAiRunner: {
@@ -81,6 +86,11 @@ describe('AiService', () => {
       },
       workout: {
         findMany: jest.fn(),
+        count: jest.fn(),
+      },
+      workoutCompletion: {
+        count: jest.fn(),
+        findMany: jest.fn(),
       },
     };
     modelAiRunner = {
@@ -88,6 +98,10 @@ describe('AiService', () => {
       buildMonthlyWorkoutPlan: jest.fn(),
       buildInsightChatReply: jest.fn(),
     };
+
+    prisma.workoutCompletion.count.mockResolvedValue(0);
+    prisma.workout.count.mockResolvedValue(0);
+    prisma.workoutCompletion.findMany.mockResolvedValue([]);
 
     service = new AiService(
       prisma as never,
@@ -289,7 +303,7 @@ describe('AiService', () => {
       ],
     });
 
-    const result = (await service.buildWorkoutPlanPreview({
+    const result = (await service.buildWorkoutPlanPreview('user-1', {
       goal: 'muscle_gain',
       equipment: ['bodyweight', 'band', 'dumbbell'],
       heightCm: 180,
@@ -404,7 +418,7 @@ describe('AiService', () => {
       },
     });
 
-    const result = (await service.buildMonthlyWorkoutPlan({
+    const result = (await service.buildMonthlyWorkoutPlan('user-1', {
       goal: 'muscle_gain',
       equipment: ['bodyweight', 'band', 'dumbbell'],
       heightCm: 180,
@@ -488,7 +502,6 @@ describe('AiService', () => {
       where: {
         userId: 'user-1',
         deletedAt: null,
-        isTemplate: false,
       },
       include: {
         items: {
@@ -609,6 +622,158 @@ describe('AiService', () => {
       }),
     );
     expect(result.data.reply.content).toContain('what should i train next');
+  });
+
+  it('builds a workout preview with high fatigue from database and reduces sets reps', async () => {
+    prisma.workoutCompletion.count.mockResolvedValue(3);
+    prisma.workout.count.mockResolvedValue(2);
+    prisma.workoutCompletion.findMany.mockResolvedValue([
+      { effort: 'too_hard', sorenessAreas: ['shoulder'] },
+      { effort: 'too_hard', sorenessAreas: ['back'] },
+      { effort: 'just_right', sorenessAreas: [] },
+    ]);
+
+    modelAiRunner.buildWorkoutPlan.mockResolvedValue({
+      schema_version: 'coach-plan-v1',
+      model_version: 'sklearn-random-forest-regressor',
+      goal_slug: 'build_muscle',
+      safety_notes: ['Start conservatively.'],
+      coach_summary: 'Recovery focused plan',
+      coach_notes: [],
+      readiness_adjustment: {
+        intensity_modifier: 'reduce',
+        reason: 'High fatigue reported.',
+      },
+      progression_plan: [
+        {
+          week: 1,
+          load_multiplier: 0.9,
+          target_sets: 3,
+          is_deload: true,
+          progression_rule: 'Decrease load or reps.',
+          focus: 'recover',
+        },
+      ],
+      weekly_schedule: [],
+      workouts: [
+        {
+          title: 'Incline push-up',
+          body_part: 'Chest',
+          equipment: 'Body Only',
+          level: 'Beginner',
+          type: 'Strength',
+          desc: 'Elevated push-up.',
+          score: 9.2,
+          model_score: 11.1,
+          sets: 3,
+          reps: '8-12 reps',
+          rest_seconds: 75,
+          confidence: 0.92,
+          rationale: 'Low compression.',
+          substitutions: [],
+        },
+      ],
+    });
+
+    const result = (await service.buildWorkoutPlanPreview('user-1', {
+      goal: 'muscle_gain',
+      equipment: ['bodyweight'],
+      heightCm: 180,
+      weightKg: 82,
+      age: 29,
+      activityLevel: 'active',
+      trainingDays: ['mo', 'we', 'fr'],
+      sessionMinutes: 30,
+      preferredTime: 'evening',
+    })) as WorkoutPlanPreviewResult;
+
+    expect(modelAiRunner.buildWorkoutPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feedback: {
+          missed_workouts: 2,
+          fatigue_level: 'high',
+          soreness_areas: ['shoulder', 'back'],
+          completed_workouts: 3,
+        },
+      }),
+    );
+    expect(result.data.workoutDraft.items[0].sets[0].reps).toBe(9); // standard is 10 (avg of 8-12), reduced by 1 becomes 9
+  });
+
+  it('builds a workout preview with low fatigue from database and increases sets reps', async () => {
+    prisma.workoutCompletion.count.mockResolvedValue(3);
+    prisma.workout.count.mockResolvedValue(0);
+    prisma.workoutCompletion.findMany.mockResolvedValue([
+      { effort: 'too_easy', sorenessAreas: [] },
+      { effort: 'too_easy', sorenessAreas: [] },
+      { effort: 'just_right', sorenessAreas: [] },
+    ]);
+
+    modelAiRunner.buildWorkoutPlan.mockResolvedValue({
+      schema_version: 'coach-plan-v1',
+      model_version: 'sklearn-random-forest-regressor',
+      goal_slug: 'build_muscle',
+      safety_notes: ['Push progression.'],
+      coach_summary: 'Consistency rewards progression',
+      coach_notes: [],
+      readiness_adjustment: {
+        intensity_modifier: 'increase',
+        reason: 'Low fatigue reported.',
+      },
+      progression_plan: [
+        {
+          week: 1,
+          load_multiplier: 1.1,
+          target_sets: 3,
+          is_deload: false,
+          progression_rule: 'Increase load or reps.',
+          focus: 'progression',
+        },
+      ],
+      weekly_schedule: [],
+      workouts: [
+        {
+          title: 'Incline push-up',
+          body_part: 'Chest',
+          equipment: 'Body Only',
+          level: 'Beginner',
+          type: 'Strength',
+          desc: 'Elevated push-up.',
+          score: 9.2,
+          model_score: 11.1,
+          sets: 3,
+          reps: '8-12 reps',
+          rest_seconds: 75,
+          confidence: 0.92,
+          rationale: 'Push volume.',
+          substitutions: [],
+        },
+      ],
+    });
+
+    const result = (await service.buildWorkoutPlanPreview('user-1', {
+      goal: 'muscle_gain',
+      equipment: ['bodyweight'],
+      heightCm: 180,
+      weightKg: 82,
+      age: 29,
+      activityLevel: 'active',
+      trainingDays: ['mo', 'we', 'fr'],
+      sessionMinutes: 30,
+      preferredTime: 'evening',
+    })) as WorkoutPlanPreviewResult;
+
+    expect(modelAiRunner.buildWorkoutPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feedback: {
+          missed_workouts: 0,
+          fatigue_level: 'low',
+          soreness_areas: [],
+          completed_workouts: 3,
+        },
+      }),
+    );
+    expect(result.data.workoutDraft.items[0].sets[0].reps).toBe(11); // standard is 10 (avg of 8-12), increased by 1 becomes 11
   });
 
   function mockedTemplate(templateId: string, title: string, focus: string) {

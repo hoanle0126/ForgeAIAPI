@@ -68,6 +68,7 @@ type InsightWorkout = {
   status: InsightWorkoutStatus;
   isTemplate: boolean;
   scheduledFor: Date | null;
+  scheduledDays?: string[];
   updatedAt: Date;
   createdAt: Date;
   items: InsightWorkoutItem[];
@@ -160,7 +161,13 @@ export function buildInsightOverview(
   );
 
   for (const workout of input.workouts) {
-    if (workout.isTemplate || workout.status === 'archived') {
+    const isStaticTemplate =
+      workout.isTemplate &&
+      !workout.scheduledFor &&
+      (!workout.scheduledDays || workout.scheduledDays.length === 0) &&
+      workout.status !== 'completed';
+
+    if (isStaticTemplate || workout.status === 'archived') {
       continue;
     }
 

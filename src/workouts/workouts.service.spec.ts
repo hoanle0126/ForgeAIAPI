@@ -16,6 +16,7 @@ describe('WorkoutsService', () => {
     };
     workout: {
       create: jest.Mock;
+      findFirst: jest.Mock;
       findMany: jest.Mock;
       update: jest.Mock;
     };
@@ -25,6 +26,10 @@ describe('WorkoutsService', () => {
     };
     workoutSet: {
       updateMany: jest.Mock;
+      update: jest.Mock;
+    };
+    workoutCompletion: {
+      create: jest.Mock;
     };
     $transaction: jest.Mock;
   };
@@ -40,6 +45,7 @@ describe('WorkoutsService', () => {
       },
       workout: {
         create: jest.fn(),
+        findFirst: jest.fn(),
         findMany: jest.fn(),
         update: jest.fn(),
       },
@@ -49,6 +55,10 @@ describe('WorkoutsService', () => {
       },
       workoutSet: {
         updateMany: jest.fn(),
+        update: jest.fn(),
+      },
+      workoutCompletion: {
+        create: jest.fn(),
       },
       $transaction: jest.fn((callback: (tx: typeof prisma) => unknown) =>
         callback(prisma),
@@ -281,6 +291,107 @@ describe('WorkoutsService', () => {
       where: { id: 'workout-1' },
       data: { status: WorkoutStatus.planned },
       select: { status: true },
+    });
+  });
+
+  describe('completeWorkout adaptive adjustment', () => {
+    it('should propagate difficulty adjustment to upcoming planned and draft workouts', async () => {
+      const activeWorkoutId = 'workout-1';
+      const futureWorkoutId = 'workout-future';
+
+      const mockActiveWorkout = {
+        id: activeWorkoutId,
+        userId,
+        difficulty: 'beginner',
+        status: WorkoutStatus.planned,
+        items: [
+          {
+            id: 'item-1',
+            sets: [
+              { id: 'set-1', reps: 10, weightKg: 20, durationSeconds: null },
+            ],
+          },
+        ],
+      };
+
+      const mockFutureWorkout = {
+        id: futureWorkoutId,
+        userId,
+        difficulty: 'beginner',
+        status: WorkoutStatus.planned,
+        items: [
+          {
+            id: 'item-future-1',
+            sets: [
+              {
+                id: 'set-future-1',
+                reps: 8,
+                weightKg: 15,
+                durationSeconds: null,
+              },
+            ],
+          },
+        ],
+      };
+
+      prisma.workout.findFirst.mockResolvedValue(mockActiveWorkout);
+      prisma.workout.findMany.mockResolvedValue([mockFutureWorkout]);
+      prisma.workoutCompletion.create.mockResolvedValue({ id: 'completion-1' });
+
+      await service.completeWorkout(userId, activeWorkoutId, {
+        effort: 'just_right',
+        difficultyAdjustment: 'increase',
+      });
+
+      // Verify active workout set was increased
+      expect(prisma.workoutSet.update).toHaveBeenCalledWith({
+        where: { id: 'set-1' },
+        data: {
+          reps: 11,
+          weightKg: 22, // 20 * 1.1 = 22 -> rounded is 22. 22 > 20, so stays 22.
+          durationSeconds: null,
+        },
+      });
+
+      // Verify active workout difficulty level was upgraded
+      expect(prisma.workout.update).toHaveBeenCalledWith({
+        where: { id: activeWorkoutId },
+        data: { difficulty: 'intermediate' },
+      });
+
+      // Verify future workouts were queried
+      expect(prisma.workout.findMany).toHaveBeenCalledWith({
+        where: {
+          userId,
+          id: { not: activeWorkoutId },
+          OR: [
+            { status: { in: [WorkoutStatus.planned, WorkoutStatus.draft] } },
+            { isTemplate: true },
+          ],
+          deletedAt: null,
+        },
+        include: {
+          items: {
+            include: { sets: true },
+          },
+        },
+      });
+
+      // Verify future workout set was adjusted
+      expect(prisma.workoutSet.update).toHaveBeenCalledWith({
+        where: { id: 'set-future-1' },
+        data: {
+          reps: 9,
+          weightKg: 16.5, // 15 * 1.1 = 16.5 -> rounded is 16.5. 16.5 > 15, so stays 16.5.
+          durationSeconds: null,
+        },
+      });
+
+      // Verify future workout difficulty level was upgraded
+      expect(prisma.workout.update).toHaveBeenCalledWith({
+        where: { id: futureWorkoutId },
+        data: { difficulty: 'intermediate' },
+      });
     });
   });
 });

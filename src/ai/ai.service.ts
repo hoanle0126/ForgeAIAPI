@@ -218,10 +218,24 @@ export class AiService {
   }
 
   async buildWorkoutPlanPreview(
+    userId: string,
     dto: BuildWorkoutPlanDto,
   ): Promise<{ message: string; data: unknown }> {
     const normalizedTrainingDays = this.normalizeTrainingDays(dto.trainingDays);
     const effectiveTrainingDays = Math.min(normalizedTrainingDays.length, 6);
+
+    const dbFeedback = dto.feedback
+      ? undefined
+      : await this.getFeedbackFromDatabase(userId);
+    const effectiveFeedback = dto.feedback
+      ? {
+          missed_workouts: dto.feedback.missedWorkouts,
+          fatigue_level: dto.feedback.fatigueLevel,
+          soreness_areas: dto.feedback.sorenessAreas,
+          completed_workouts: dto.feedback.completedWorkouts,
+        }
+      : dbFeedback;
+
     const coachPlan = await this.modelAiRunner.buildWorkoutPlan({
       goal: dto.goal,
       equipment: dto.equipment,
@@ -233,14 +247,7 @@ export class AiService {
       session_minutes: dto.sessionMinutes,
       experience_level: dto.experienceLevel ?? 'beginner',
       injuries: dto.injuries,
-      feedback: dto.feedback
-        ? {
-            missed_workouts: dto.feedback.missedWorkouts,
-            fatigue_level: dto.feedback.fatigueLevel,
-            soreness_areas: dto.feedback.sorenessAreas,
-            completed_workouts: dto.feedback.completedWorkouts,
-          }
-        : undefined,
+      feedback: effectiveFeedback,
     });
     const previewExercises = this.buildPreviewExercises(
       coachPlan,
@@ -296,9 +303,22 @@ export class AiService {
   }
 
   async buildMonthlyWorkoutPlan(
+    userId: string,
     dto: BuildMonthlyWorkoutPlanDto,
   ): Promise<{ message: string; data: unknown }> {
     const normalizedTrainingDays = this.normalizeTrainingDays(dto.trainingDays);
+
+    const dbFeedback = dto.feedback
+      ? undefined
+      : await this.getFeedbackFromDatabase(userId);
+    const effectiveFeedback = dto.feedback
+      ? {
+          missed_workouts: dto.feedback.missedWorkouts,
+          fatigue_level: dto.feedback.fatigueLevel,
+          soreness_areas: dto.feedback.sorenessAreas,
+          completed_workouts: dto.feedback.completedWorkouts,
+        }
+      : dbFeedback;
 
     const coachPlan = await this.modelAiRunner.buildMonthlyWorkoutPlan({
       goal: dto.goal,
@@ -311,14 +331,7 @@ export class AiService {
       session_minutes: dto.sessionMinutes,
       experience_level: dto.experienceLevel ?? 'beginner',
       injuries: dto.injuries,
-      feedback: dto.feedback
-        ? {
-            missed_workouts: dto.feedback.missedWorkouts,
-            fatigue_level: dto.feedback.fatigueLevel,
-            soreness_areas: dto.feedback.sorenessAreas,
-            completed_workouts: dto.feedback.completedWorkouts,
-          }
-        : undefined,
+      feedback: effectiveFeedback,
     });
 
     const templateWorkouts = coachPlan.workout_templates.map((template) =>
@@ -539,7 +552,11 @@ export class AiService {
         notes: this.buildExerciseNote(exercise),
         sets: Array.from({ length: exercise.sets }, (_, index) => ({
           order: index + 1,
-          ...this.parseWorkoutSetTemplate(exercise.reps, exercise.restSeconds),
+          ...this.parseWorkoutSetTemplate(
+            exercise.reps,
+            exercise.restSeconds,
+            coachPlan.readiness_adjustment?.intensity_modifier,
+          ),
         })),
       })),
     };
@@ -575,7 +592,11 @@ export class AiService {
         notes: [exercise.rationale, exercise.desc].filter(Boolean).join('\n'),
         sets: Array.from({ length: exercise.sets }, (_, setIndex) => ({
           order: setIndex + 1,
-          ...this.parseWorkoutSetTemplate(exercise.reps, exercise.rest_seconds),
+          ...this.parseWorkoutSetTemplate(
+            exercise.reps,
+            exercise.rest_seconds,
+            coachPlan.readiness_adjustment?.intensity_modifier,
+          ),
         })),
       })),
     };
@@ -630,57 +651,81 @@ export class AiService {
   private parseWorkoutSetTemplate(
     repsLabel: string,
     restSeconds: number,
+    intensityModifier?: string,
   ): WorkoutDraftSetTemplate {
     const normalized = repsLabel.toLowerCase();
     const minuteRangeMatch = normalized.match(/(\d+)\s*-\s*(\d+)\s*minutes?/);
+
+    let baseSet: WorkoutDraftSetTemplate;
 
     if (minuteRangeMatch) {
       const low = Number(minuteRangeMatch[1]);
       const high = Number(minuteRangeMatch[2]);
 
-      return {
+      baseSet = {
         durationSeconds: Math.round(((low + high) / 2) * 60),
         restSeconds,
       };
+    } else {
+      const secondRangeMatch = normalized.match(/(\d+)\s*-\s*(\d+)\s*seconds?/);
+
+      if (secondRangeMatch) {
+        const low = Number(secondRangeMatch[1]);
+        const high = Number(secondRangeMatch[2]);
+
+        baseSet = {
+          durationSeconds: Math.round((low + high) / 2),
+          restSeconds,
+        };
+      } else {
+        const repRangeMatch = normalized.match(/(\d+)\s*-\s*(\d+)/);
+
+        if (repRangeMatch) {
+          const low = Number(repRangeMatch[1]);
+          const high = Number(repRangeMatch[2]);
+
+          baseSet = {
+            reps: Math.round((low + high) / 2),
+            restSeconds,
+          };
+        } else {
+          const singleRepMatch = normalized.match(/(\d+)\s*reps?/);
+
+          if (singleRepMatch) {
+            baseSet = {
+              reps: Number(singleRepMatch[1]),
+              restSeconds,
+            };
+          } else {
+            baseSet = {
+              reps: 10,
+              restSeconds,
+            };
+          }
+        }
+      }
     }
 
-    const secondRangeMatch = normalized.match(/(\d+)\s*-\s*(\d+)\s*seconds?/);
-
-    if (secondRangeMatch) {
-      const low = Number(secondRangeMatch[1]);
-      const high = Number(secondRangeMatch[2]);
-
-      return {
-        durationSeconds: Math.round((low + high) / 2),
-        restSeconds,
-      };
+    if (intensityModifier === 'increase') {
+      if (baseSet.reps !== undefined) {
+        baseSet.reps += 1;
+      }
+      if (baseSet.durationSeconds !== undefined) {
+        baseSet.durationSeconds = Math.round(baseSet.durationSeconds * 1.1);
+      }
+    } else if (intensityModifier === 'reduce') {
+      if (baseSet.reps !== undefined) {
+        baseSet.reps = Math.max(1, baseSet.reps - 1);
+      }
+      if (baseSet.durationSeconds !== undefined) {
+        baseSet.durationSeconds = Math.max(
+          10,
+          Math.round(baseSet.durationSeconds * 0.9),
+        );
+      }
     }
 
-    const repRangeMatch = normalized.match(/(\d+)\s*-\s*(\d+)/);
-
-    if (repRangeMatch) {
-      const low = Number(repRangeMatch[1]);
-      const high = Number(repRangeMatch[2]);
-
-      return {
-        reps: Math.round((low + high) / 2),
-        restSeconds,
-      };
-    }
-
-    const singleRepMatch = normalized.match(/(\d+)\s*reps?/);
-
-    if (singleRepMatch) {
-      return {
-        reps: Number(singleRepMatch[1]),
-        restSeconds,
-      };
-    }
-
-    return {
-      reps: 10,
-      restSeconds,
-    };
+    return baseSet;
   }
 
   private deriveWorkoutDifficulty(
@@ -804,7 +849,6 @@ export class AiService {
         where: {
           userId,
           deletedAt: null,
-          isTemplate: false,
         },
         include: {
           items: {
@@ -850,6 +894,7 @@ export class AiService {
       status: workout.status,
       isTemplate: workout.isTemplate,
       scheduledFor: workout.scheduledFor,
+      scheduledDays: workout.scheduledDays,
       updatedAt: workout.updatedAt,
       createdAt: workout.createdAt,
       items: workout.items.map((item) => ({
@@ -879,5 +924,76 @@ export class AiService {
     }
 
     return 5;
+  }
+
+  private async getFeedbackFromDatabase(userId: string) {
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const [completedCount, missedCount, completions] = await Promise.all([
+      this.prisma.workoutCompletion.count({
+        where: {
+          userId,
+          completedAt: { gte: oneWeekAgo },
+        },
+      }),
+      this.prisma.workout.count({
+        where: {
+          userId,
+          status: 'planned',
+          scheduledFor: {
+            gte: oneWeekAgo,
+            lt: new Date(),
+          },
+        },
+      }),
+      this.prisma.workoutCompletion.findMany({
+        where: {
+          userId,
+          completedAt: { gte: oneWeekAgo },
+        },
+        select: {
+          effort: true,
+          sorenessAreas: true,
+        },
+      }),
+    ]);
+
+    const sorenessAreasSet = new Set<string>();
+    let tooHardCount = 0;
+    let tooEasyCount = 0;
+
+    for (const c of completions) {
+      if (c.effort === 'too_hard') {
+        tooHardCount++;
+      } else if (c.effort === 'too_easy') {
+        tooEasyCount++;
+      }
+
+      if (c.sorenessAreas) {
+        for (const area of c.sorenessAreas) {
+          const cleaned = area.trim().toLowerCase();
+          if (cleaned) {
+            sorenessAreasSet.add(cleaned);
+          }
+        }
+      }
+    }
+
+    let fatigue_level = 'normal';
+    if (completions.length > 0) {
+      if (tooHardCount / completions.length >= 0.33) {
+        fatigue_level = 'high';
+      } else if (tooEasyCount / completions.length >= 0.5) {
+        fatigue_level = 'low';
+      }
+    }
+
+    return {
+      missed_workouts: missedCount,
+      fatigue_level,
+      soreness_areas: Array.from(sorenessAreasSet),
+      completed_workouts: completedCount,
+    };
   }
 }

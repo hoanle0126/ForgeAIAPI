@@ -11,7 +11,11 @@ import {
 } from 'class-validator';
 import { WorkoutEffortFeedback } from '@prisma/client';
 
-export const difficultyAdjustments = ['increase', 'maintain', 'decrease'] as const;
+export const difficultyAdjustments = [
+  'increase',
+  'maintain',
+  'decrease',
+] as const;
 export type DifficultyAdjustmentDto = (typeof difficultyAdjustments)[number];
 
 export class CompleteWorkoutDto {

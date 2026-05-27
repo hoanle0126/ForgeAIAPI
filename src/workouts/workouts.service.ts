@@ -288,6 +288,7 @@ export class WorkoutsService {
         const factor = dto.difficultyAdjustment === 'increase' ? 1.1 : 0.9;
         const repOffset = dto.difficultyAdjustment === 'increase' ? 1 : -1;
 
+        // 4.1. Adjust current workout sets
         for (const item of workout.items) {
           for (const set of item.sets) {
             let updatedWeight = set.weightKg;
@@ -297,9 +298,7 @@ export class WorkoutsService {
             if (set.weightKg && set.weightKg > 0) {
               if (dto.difficultyAdjustment === 'increase') {
                 const calculated = set.weightKg * factor;
-                // Round to nearest 0.5kg
                 updatedWeight = Math.round(calculated * 2) / 2;
-                // If it didn't increase due to rounding, add 0.5kg
                 if (updatedWeight <= set.weightKg) {
                   updatedWeight += 0.5;
                 }
@@ -323,8 +322,14 @@ export class WorkoutsService {
                   updatedDuration += 5;
                 }
               } else {
-                updatedDuration = Math.max(5, Math.round(set.durationSeconds * factor));
-                if (updatedDuration >= set.durationSeconds && set.durationSeconds > 5) {
+                updatedDuration = Math.max(
+                  5,
+                  Math.round(set.durationSeconds * factor),
+                );
+                if (
+                  updatedDuration >= set.durationSeconds &&
+                  set.durationSeconds > 5
+                ) {
                   updatedDuration -= 5;
                 }
               }
@@ -341,14 +346,16 @@ export class WorkoutsService {
           }
         }
 
-        // 5. Update overall workout difficulty level
+        // 4.2. Update overall current workout difficulty level
         let newDifficulty = workout.difficulty;
         if (dto.difficultyAdjustment === 'increase') {
           if (workout.difficulty === 'beginner') newDifficulty = 'intermediate';
-          else if (workout.difficulty === 'intermediate') newDifficulty = 'advanced';
+          else if (workout.difficulty === 'intermediate')
+            newDifficulty = 'advanced';
         } else if (dto.difficultyAdjustment === 'decrease') {
           if (workout.difficulty === 'advanced') newDifficulty = 'intermediate';
-          else if (workout.difficulty === 'intermediate') newDifficulty = 'beginner';
+          else if (workout.difficulty === 'intermediate')
+            newDifficulty = 'beginner';
         }
 
         if (newDifficulty !== workout.difficulty) {
@@ -356,6 +363,103 @@ export class WorkoutsService {
             where: { id },
             data: { difficulty: newDifficulty },
           });
+        }
+
+        // 4.3. Adjust all upcoming/future workouts of the user
+        const futureWorkouts = await tx.workout.findMany({
+          where: {
+            userId,
+            id: { not: id },
+            OR: [
+              { status: { in: [WorkoutStatus.planned, WorkoutStatus.draft] } },
+              { isTemplate: true },
+            ],
+            deletedAt: null,
+          },
+          include: {
+            items: {
+              include: { sets: true },
+            },
+          },
+        });
+
+        for (const futureWorkout of futureWorkouts) {
+          for (const item of futureWorkout.items) {
+            for (const set of item.sets) {
+              let updatedWeight = set.weightKg;
+              let updatedReps = set.reps;
+              let updatedDuration = set.durationSeconds;
+
+              if (set.weightKg && set.weightKg > 0) {
+                if (dto.difficultyAdjustment === 'increase') {
+                  const calculated = set.weightKg * factor;
+                  updatedWeight = Math.round(calculated * 2) / 2;
+                  if (updatedWeight <= set.weightKg) {
+                    updatedWeight += 0.5;
+                  }
+                } else {
+                  const calculated = set.weightKg * factor;
+                  updatedWeight = Math.max(0.5, Math.round(calculated * 2) / 2);
+                  if (updatedWeight >= set.weightKg && set.weightKg > 0.5) {
+                    updatedWeight -= 0.5;
+                  }
+                }
+              }
+
+              if (set.reps && set.reps > 0) {
+                updatedReps = Math.max(1, set.reps + repOffset);
+              }
+
+              if (set.durationSeconds && set.durationSeconds > 0) {
+                if (dto.difficultyAdjustment === 'increase') {
+                  updatedDuration = Math.round(set.durationSeconds * factor);
+                  if (updatedDuration <= set.durationSeconds) {
+                    updatedDuration += 5;
+                  }
+                } else {
+                  updatedDuration = Math.max(
+                    5,
+                    Math.round(set.durationSeconds * factor),
+                  );
+                  if (
+                    updatedDuration >= set.durationSeconds &&
+                    set.durationSeconds > 5
+                  ) {
+                    updatedDuration -= 5;
+                  }
+                }
+              }
+
+              await tx.workoutSet.update({
+                where: { id: set.id },
+                data: {
+                  weightKg: updatedWeight,
+                  reps: updatedReps,
+                  durationSeconds: updatedDuration,
+                },
+              });
+            }
+          }
+
+          let futureDifficulty = futureWorkout.difficulty;
+          if (dto.difficultyAdjustment === 'increase') {
+            if (futureWorkout.difficulty === 'beginner')
+              futureDifficulty = 'intermediate';
+            else if (futureWorkout.difficulty === 'intermediate')
+              futureDifficulty = 'advanced';
+          } else if (dto.difficultyAdjustment === 'decrease') {
+            if (futureWorkout.difficulty === 'advanced')
+              futureDifficulty = 'intermediate';
+            else if (futureWorkout.difficulty === 'intermediate')
+              futureDifficulty = 'beginner';
+          }
+
+          if (futureDifficulty !== futureWorkout.difficulty) {
+            await tx.workout.update({
+              where: { id: futureWorkout.id },
+              data: { difficulty: futureDifficulty },
+            });
+          }
         }
       }
 

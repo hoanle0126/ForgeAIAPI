@@ -20,16 +20,18 @@ export class AiController {
 
   @Post('workout-builder/preview')
   buildWorkoutPlanPreview(
+    @Req() req: AuthenticatedRequest,
     @Body() dto: BuildWorkoutPlanDto,
   ): Promise<{ message: string; data: unknown }> {
-    return this.aiService.buildWorkoutPlanPreview(dto);
+    return this.aiService.buildWorkoutPlanPreview(req.user.sub, dto);
   }
 
   @Post('workout-builder/monthly-plan')
   buildMonthlyWorkoutPlan(
+    @Req() req: AuthenticatedRequest,
     @Body() dto: BuildMonthlyWorkoutPlanDto,
   ): Promise<{ message: string; data: unknown }> {
-    return this.aiService.buildMonthlyWorkoutPlan(dto);
+    return this.aiService.buildMonthlyWorkoutPlan(req.user.sub, dto);
   }
 
   @Get('insights/overview')
